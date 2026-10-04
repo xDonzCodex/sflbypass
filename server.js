@@ -172,7 +172,7 @@ app.get('/', (req, res) => {
   res.json({
     creator: 'xDonzCode',
     scraperName: 'sfl.gl',
-    status: 'online',
+    status: 'Xonline',
     usage: '/api/bypass?url=https://sfl.gl/xxx',
   });
 });
