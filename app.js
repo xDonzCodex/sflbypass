@@ -1,0 +1,150 @@
+const express = require('express');
+const puppeteer = require('puppeteer');
+const path = require('path');
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+/* ============================================================
+ * BYPASS FUNCTION
+ * ============================================================ */
+async function bypassSFL(url) {
+  if (!url || !url.startsWith('http')) throw new Error('URL tidak valid');
+
+  const browser = await puppeteer.launch({
+    headless: 'new',
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--disable-software-rasterizer',
+      '--single-process',
+      '--no-zygote',
+      '--disable-blink-features=AutomationControlled',
+    ],
+  });
+
+  try {
+    const page = await browser.newPage();
+    await page.setUserAgent(
+      'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Mobile Safari/537.36'
+    );
+    await page.setViewport({ width: 412, height: 915, isMobile: true, hasTouch: true });
+
+    // Anti-detection
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => false });
+      window.open = () => {};
+      window.alert = () => {};
+      window.confirm = () => true;
+    });
+
+    // Timer accelerator
+    await page.evaluateOnNewDocument((accel) => {
+      const NT = window.setTimeout;
+      const NI = window.setInterval;
+      window.setTimeout = (f, m) => NT(f, m / accel);
+      window.setInterval = (f, m) => NI(f, m / accel);
+    }, 1e7);
+
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+
+    const selectors = [
+      '#submit-button',
+      '#btn-2',
+      '#verify > a',
+      '#verify > button',
+      '#first_open_button_page_1',
+      '#btn-3',
+    ];
+
+    const start = Date.now();
+    let finalUrl = url;
+
+    while (Date.now() - start < 60000) {
+      await page.evaluate((sels) => {
+        for (const sel of sels) {
+          for (const el of document.querySelectorAll(sel)) {
+            if (el && el.offsetParent !== null && !el.dataset.bypassed) {
+              if (sel === '#verify > a' && el.textContent.trim() === 'Scroll Down')
+                continue;
+              el.dataset.bypassed = '1';
+              try { el.click(); } catch {}
+            }
+          }
+        }
+        if (location.href.includes('sfl.gl/ready/go')) {
+          for (const el of document.querySelectorAll('span.font-medium.text-base')) {
+            if (el.textContent.trim() === 'OPEN LINK' && !el.dataset.bypassed) {
+              el.dataset.bypassed = '1';
+              el.click();
+            }
+          }
+        }
+      }, selectors);
+
+      const currentUrl = page.url();
+      if (currentUrl !== finalUrl && !currentUrl.includes('sfl.gl')) {
+        finalUrl = currentUrl;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 300));
+    }
+
+    await new Promise((r) => setTimeout(r, 2000));
+    finalUrl = page.url();
+
+    if (/sfl\.gl/i.test(finalUrl)) {
+      return {
+        success: false,
+        original: url,
+        result: finalUrl,
+        error: 'Bypass gagal — masih di halaman SFL.GL',
+      };
+    }
+
+    return {
+      success: true,
+      original: url,
+      result: finalUrl,
+      service: 'sfl.gl',
+      via: 'puppeteer',
+    };
+  } finally {
+    await browser.close();
+  }
+}
+
+/* ============================================================
+ * ROUTES
+ * ============================================================ */
+
+// API endpoint
+app.get('/api/bypass', async (req, res) => {
+  const url = req.query.url;
+  if (!url) return res.status(400).json({ success: false, error: 'Parameter ?url= required' });
+
+  const start = Date.now();
+  try {
+    const result = await bypassSFL(url);
+    res.json({ ...result, time: `${((Date.now() - start) / 1000).toFixed(2)}s` });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message, original: url });
+  }
+});
+
+// Root
+app.get('/', (req, res) => {
+  res.json({
+    creator: 'xDonzCode',
+    scraperName: 'sfl.gl',
+    status: 'online',
+    usage: '/api/bypass?url=https://sfl.gl/xxx',
+  });
+});
+
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
