@@ -48,21 +48,18 @@ async function bypassSFL(url) {
       window.setInterval = (f, m) => NI(f, m / accel);
     }, 1e7);
 
-    // === GOTO dengan handle error redirect ===
     try {
       await page.goto(url, {
         waitUntil: 'domcontentloaded',
         timeout: 60000,
       });
     } catch (e) {
-      // Abaikan error navigasi — halaman mungkin udah redirect
       if (!/Execution context|navigation|ERR_ABORTED/i.test(e.message)) {
         throw e;
       }
     }
 
-    // Tunggu halaman stabil dulu
-    await sleep(2000);
+    await sleep(1000); // ← dari 2000 jadi 1000
 
     const selectors = [
       '#submit-button',
@@ -76,9 +73,7 @@ async function bypassSFL(url) {
     const start = Date.now();
     let finalUrl = page.url();
 
-    // === LOOP UTAMA — semua operasi dibungkus try/catch ===
     while (Date.now() - start < 60000) {
-      // Baca URL dengan aman
       let currentUrl;
       try {
         currentUrl = page.url();
@@ -86,14 +81,12 @@ async function bypassSFL(url) {
         currentUrl = finalUrl;
       }
 
-      // Kalau udah keluar dari sfl.gl → selesai
       if (currentUrl !== finalUrl && !/sfl\.gl/i.test(currentUrl)) {
         finalUrl = currentUrl;
         break;
       }
       finalUrl = currentUrl;
 
-      // Coba klik tombol
       try {
         await page.evaluate((sels) => {
           for (const sel of sels) {
@@ -116,17 +109,15 @@ async function bypassSFL(url) {
           }
         }, selectors);
       } catch (e) {
-        // Abaikan error navigasi
         if (!/Execution context|Cannot find context|navigation/i.test(e.message)) {
           console.error('[loop]', e.message);
         }
       }
 
-      await sleep(400);
+      await sleep(100); // ← dari 300 jadi 100
     }
 
-    // Tunggu redirect final
-    await sleep(3000);
+    await sleep(1500); // ← dari 3000 jadi 1500
 
     try {
       finalUrl = page.url();
@@ -155,26 +146,43 @@ async function bypassSFL(url) {
   }
 }
 
+app.get('/', (req, res) => {
+  res.json({
+    creator: 'xDonzCode',
+    status: 'online',
+    bypassMenu: {
+      sflgl: '/api/bypass?url=https://sfl.gl/xxx',
+    },
+  });
+});
+
 app.get('/api/bypass', async (req, res) => {
   const url = req.query.url;
-  if (!url) return res.status(400).json({ success: false, error: 'Parameter ?url= required' });
+
+  if (!url) {
+    return res.status(400).json({
+      creator: 'xDonzCode',
+      success: false,
+      error: 'Parameter ?url= required',
+    });
+  }
 
   const start = Date.now();
   try {
     const result = await bypassSFL(url);
-    res.json({ ...result, time: `${((Date.now() - start) / 1000).toFixed(2)}s` });
+    res.json({
+      creator: 'xDonzCode',
+      ...result,
+      time: `${((Date.now() - start) / 1000).toFixed(2)}s`,
+    });
   } catch (e) {
-    res.status(500).json({ success: false, error: e.message, original: url });
+    res.status(500).json({
+      creator: 'xDonzCode',
+      success: false,
+      error: e.message,
+      original: url,
+    });
   }
-});
-
-app.get('/', (req, res) => {
-  res.json({
-    creator: 'xDonzCode',
-    scraperName: 'sfl.gl',
-    status: 'Xonline',
-    usage: '/api/bypass?url=https://sfl.gl/xxx',
-  });
 });
 
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
