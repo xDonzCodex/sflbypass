@@ -1,6 +1,5 @@
 const express = require('express');
 const puppeteer = require('puppeteer');
-const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -8,9 +7,6 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-/* ============================================================
- * BYPASS FUNCTION
- * ============================================================ */
 async function bypassSFL(url) {
   if (!url || !url.startsWith('http')) throw new Error('URL tidak valid');
 
@@ -35,7 +31,6 @@ async function bypassSFL(url) {
     );
     await page.setViewport({ width: 412, height: 915, isMobile: true, hasTouch: true });
 
-    // Anti-detection
     await page.evaluateOnNewDocument(() => {
       Object.defineProperty(navigator, 'webdriver', { get: () => false });
       window.open = () => {};
@@ -43,7 +38,6 @@ async function bypassSFL(url) {
       window.confirm = () => true;
     });
 
-    // Timer accelerator
     await page.evaluateOnNewDocument((accel) => {
       const NT = window.setTimeout;
       const NI = window.setInterval;
@@ -66,37 +60,53 @@ async function bypassSFL(url) {
     let finalUrl = url;
 
     while (Date.now() - start < 60000) {
-      await page.evaluate((sels) => {
-        for (const sel of sels) {
-          for (const el of document.querySelectorAll(sel)) {
-            if (el && el.offsetParent !== null && !el.dataset.bypassed) {
-              if (sel === '#verify > a' && el.textContent.trim() === 'Scroll Down')
-                continue;
-              el.dataset.bypassed = '1';
-              try { el.click(); } catch {}
+      try {
+        await page.evaluate((sels) => {
+          for (const sel of sels) {
+            for (const el of document.querySelectorAll(sel)) {
+              if (el && el.offsetParent !== null && !el.dataset.bypassed) {
+                if (sel === '#verify > a' && el.textContent.trim() === 'Scroll Down')
+                  continue;
+                el.dataset.bypassed = '1';
+                try { el.click(); } catch {}
+              }
             }
           }
-        }
-        if (location.href.includes('sfl.gl/ready/go')) {
-          for (const el of document.querySelectorAll('span.font-medium.text-base')) {
-            if (el.textContent.trim() === 'OPEN LINK' && !el.dataset.bypassed) {
-              el.dataset.bypassed = '1';
-              el.click();
+          if (location.href.includes('sfl.gl/ready/go')) {
+            for (const el of document.querySelectorAll('span.font-medium.text-base')) {
+              if (el.textContent.trim() === 'OPEN LINK' && !el.dataset.bypassed) {
+                el.dataset.bypassed = '1';
+                el.click();
+              }
             }
           }
+        }, selectors);
+      } catch (e) {
+        if (!/Execution context was destroyed|Cannot find context/i.test(e.message)) {
+          console.error('[loop error]', e.message);
         }
-      }, selectors);
+      }
 
-      const currentUrl = page.url();
+      let currentUrl;
+      try {
+        currentUrl = page.url();
+      } catch {
+        currentUrl = finalUrl;
+      }
+
       if (currentUrl !== finalUrl && !currentUrl.includes('sfl.gl')) {
         finalUrl = currentUrl;
         break;
       }
+
       await new Promise((r) => setTimeout(r, 300));
     }
 
     await new Promise((r) => setTimeout(r, 2000));
-    finalUrl = page.url();
+
+    try {
+      finalUrl = page.url();
+    } catch {}
 
     if (/sfl\.gl/i.test(finalUrl)) {
       return {
@@ -119,11 +129,6 @@ async function bypassSFL(url) {
   }
 }
 
-/* ============================================================
- * ROUTES
- * ============================================================ */
-
-// API endpoint
 app.get('/api/bypass', async (req, res) => {
   const url = req.query.url;
   if (!url) return res.status(400).json({ success: false, error: 'Parameter ?url= required' });
@@ -137,7 +142,6 @@ app.get('/api/bypass', async (req, res) => {
   }
 });
 
-// Root
 app.get('/', (req, res) => {
   res.json({
     creator: 'xDonzCode',
