@@ -2,10 +2,12 @@ const express = require('express');
 const puppeteer = require('puppeteer');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function bypassSFL(url) {
   if (!url || !url.startsWith('http')) throw new Error('URL tidak valid');
@@ -21,6 +23,7 @@ async function bypassSFL(url) {
       '--single-process',
       '--no-zygote',
       '--disable-blink-features=AutomationControlled',
+      '--disable-features=IsolateOrigins,site-per-process',
     ],
   });
 
@@ -45,7 +48,21 @@ async function bypassSFL(url) {
       window.setInterval = (f, m) => NI(f, m / accel);
     }, 1e7);
 
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    // === GOTO dengan handle error redirect ===
+    try {
+      await page.goto(url, {
+        waitUntil: 'domcontentloaded',
+        timeout: 60000,
+      });
+    } catch (e) {
+      // Abaikan error navigasi — halaman mungkin udah redirect
+      if (!/Execution context|navigation|ERR_ABORTED/i.test(e.message)) {
+        throw e;
+      }
+    }
+
+    // Tunggu halaman stabil dulu
+    await sleep(2000);
 
     const selectors = [
       '#submit-button',
@@ -57,9 +74,26 @@ async function bypassSFL(url) {
     ];
 
     const start = Date.now();
-    let finalUrl = url;
+    let finalUrl = page.url();
 
+    // === LOOP UTAMA — semua operasi dibungkus try/catch ===
     while (Date.now() - start < 60000) {
+      // Baca URL dengan aman
+      let currentUrl;
+      try {
+        currentUrl = page.url();
+      } catch {
+        currentUrl = finalUrl;
+      }
+
+      // Kalau udah keluar dari sfl.gl → selesai
+      if (currentUrl !== finalUrl && !/sfl\.gl/i.test(currentUrl)) {
+        finalUrl = currentUrl;
+        break;
+      }
+      finalUrl = currentUrl;
+
+      // Coba klik tombol
       try {
         await page.evaluate((sels) => {
           for (const sel of sels) {
@@ -82,27 +116,17 @@ async function bypassSFL(url) {
           }
         }, selectors);
       } catch (e) {
-        if (!/Execution context was destroyed|Cannot find context/i.test(e.message)) {
-          console.error('[loop error]', e.message);
+        // Abaikan error navigasi
+        if (!/Execution context|Cannot find context|navigation/i.test(e.message)) {
+          console.error('[loop]', e.message);
         }
       }
 
-      let currentUrl;
-      try {
-        currentUrl = page.url();
-      } catch {
-        currentUrl = finalUrl;
-      }
-
-      if (currentUrl !== finalUrl && !currentUrl.includes('sfl.gl')) {
-        finalUrl = currentUrl;
-        break;
-      }
-
-      await new Promise((r) => setTimeout(r, 300));
+      await sleep(400);
     }
 
-    await new Promise((r) => setTimeout(r, 2000));
+    // Tunggu redirect final
+    await sleep(3000);
 
     try {
       finalUrl = page.url();
@@ -125,7 +149,9 @@ async function bypassSFL(url) {
       via: 'puppeteer',
     };
   } finally {
-    await browser.close();
+    try {
+      await browser.close();
+    } catch {}
   }
 }
 
